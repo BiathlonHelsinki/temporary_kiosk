@@ -2,8 +2,8 @@
 
 require 'gtk3'
 # require './gtk_threads'
-# require './ruby-nfc/lib/ruby-nfc'
-require 'ruby-nfc'
+# require 'ruby-nfc'
+require_relative 'ruby-nfc-1.3/lib/ruby-nfc'
 require 'socket'
 require './bidapp_api'
 # require './tagreader'
@@ -11,7 +11,7 @@ require 'eventmachine'
 require 'timeout'
 require 'yaml'
 require 'securerandom'
-require './biathlon_tag'
+require_relative 'biathlon_tag'
 
 NUMBER, CHOICE = *(0..25).to_a
 
@@ -165,17 +165,18 @@ class TillWrapper < EventMachine::Connection
       end
  
             
-      fixed.signal_connect("read_tag") do |obj, tag_id, tag|
+      fixed.signal_connect("read_tag") do |obj, tag|
         # clear info box
         if info_box.buffer.text == 'Waiting for reader...'
           info_box.buffer.text = ''
         end
+        (tag_address, secret)= tag.split(/---/)
   
         # get tag info
         # api = BidappApi.new
-        puts "will send tag id #{tag_id} with key #{tag}"
+        puts "will send tag id #{tag_address} with key #{secret}"
 
-        userinfo = api.api_call("/nfcs/#{tag_id}/user_from_tag", {securekey: tag})
+        userinfo = api.api_call("/nfcs/#{tag_address}/user_from_tag", {securekey: secret})
 
         if userinfo['data']
           username = userinfo['data']['attributes']['username']
@@ -185,7 +186,7 @@ class TillWrapper < EventMachine::Connection
         end
 
         if (real_name.nil? || username.nil?) && tag != ''
-          info_box.buffer.text = "\nNo user found for tag #{tag_id}" + info_box.buffer.text + "\n"
+          info_box.buffer.text = "\nNo user found for tag #{tag_address}" + info_box.buffer.text + "\n"
         elsif tag != ''
           puts "/users/#{userinfo['data']['id']}/instances/#{event['id']}/user_attend"
           check_in = api.api_call("/users/#{userinfo['data']['id']}/instances/#{event['id']}/user_attend", {})
@@ -195,7 +196,7 @@ class TillWrapper < EventMachine::Connection
             info_box.buffer.text = "\nChecking in user #{real_name} (#{username}) to event '#{event['name']}" + info_box.buffer.text  + "\n"
           end
         else
-          info_box.buffer.text = "\nCan't find a user linked to tag #{tag_id}" + info_box.buffer.text + "\n"
+          info_box.buffer.text = "\nCan't find a user linked to tag #{tag_address}" + info_box.buffer.text + "\n"
         end
 
 
@@ -320,24 +321,25 @@ class TillWrapper < EventMachine::Connection
           Gtk.main_iteration
         end
  
-        tag_window.signal_connect("read_tag") do |obj,  tag|
+        tag_window.signal_connect("write_tag") do |obj,  tag|
           if tag.nil?
             p 'tag is nil'
 
           elsif tag.length > 4
             p user_list['data'][user_list_tree.selection.selected[0].to_i-1]['attributes']['slug']
-            puts 'config is ' + @config['api_url']
             puts "URL would be #{@config['api_url']}/users/#{user_list['data'][user_list_tree.selection.selected[0].to_i-1]['attributes']['slug']}/link_to_nfc"
-            puts "with post data of tag " + tag.inspect 
+
+            (tag_id, secret) = tag.split(/---/)
+            puts "with post data of tag " + tag_id + ' and secret ' + secret
             api = BidappApi.new
-            api.link_tag("/users/#{user_list['data'][user_list_tree.selection.selected[0].to_i-1]['attributes']['slug']}/link_to_nfc",  tag)
+            api.link_tag("/users/#{user_list['data'][user_list_tree.selection.selected[0].to_i-1]['attributes']['slug']}/link_to_nfc",  tag_id, secret)
             vbox.destroy
             main_menu
-            # break
+
           end
         end
         
-        t =  Thread.new { tag = tag_window.read_tag(@reader) }
+        t =  Thread.new { tag = tag_window.write_tag(@reader) }
         t.join
       end
       
