@@ -1,88 +1,26 @@
+#!/usr/bin/env ruby
+
 require 'gtk3'
 # require './gtk_threads'
+# require './ruby-nfc/lib/ruby-nfc'
 require 'ruby-nfc'
 require 'socket'
 require './bidapp_api'
 # require './tagreader'
 require 'eventmachine'
 require 'timeout'
+require 'yaml'
+require 'securerandom'
+require './biathlon_tag'
 
-MAC_ADDR = ''
-TOKEN = ''
-NUMBER, CHOICE = *(0..5).to_a
-
-class InterruptMe < Gtk::Fixed
-  type_register
-
-  signal_new("read_tag",              # name
-         GLib::Signal::RUN_FIRST, # flags
-         nil,                     # accumulator (XXX: not supported yet)
-         nil,
-         String
-   )
-   
-   def signal_do_read_tag(tag)
-     return tag
-   end
-   
-   def read_tag(reader)
-     t = Thread.new {
-   
-
-       reader.poll(IsoDep::Tag, Mifare::Classic::Tag, Mifare::Ultralight::Tag) do |tag|
-         begin
-
-            case tag
-            when Mifare::Classic::Tag
-              p 'read tag ' + tag.uid_hex
-              @tag =  tag.uid_hex
-              if !@tag.nil?
-                if @tag.length > 4
-                  break
-                end
-              end
-
-          end
-        rescue Exception => e
-            p e
-        end
-
-      end
+NUMBER, CHOICE = *(0..25).to_a
 
 
-     }
-     t.join
-  
-     self.signal_emit("read_tag", @tag)
-   
-   end
-   
-   
-  
-   def initialize
-     super
-     #init_ui
-     @tag = nil
-   end
-  
-  
-   def tag
-     @tag
-   end
-  
-   def tag=(arg)
-     puts "tag= is called"
-     @tag = arg
-   end
-   
-   install_property(GLib::Param::String.new("tag", # name
-                                         "Tag", # nick
-                                         "an NFC address", # blurb
-                                         '0',     # default
-                                         GLib::Param::READABLE |
-                                         GLib::Param::WRITABLE))
-  
- end
+
+def parse_yaml(file)
+  YAML::load(File.open(file))
+end
+
  
  
 class TillWrapper < EventMachine::Connection
@@ -90,19 +28,32 @@ class TillWrapper < EventMachine::Connection
 
   class BiathlonTill < Gtk::Window
 
-    def initialize 
+    def initialize
+      @config = parse_yaml('temporary.yml')
       EventMachine.start_server '127.0.0.1','8080', TillWrapper, 1
       @reader = readers = NFC::Reader.all[0]
       super
+      provider = Gtk::CssProvider.new
+      provider.load(:data => File.read("kiosk.css"))
+
+      apply_css(self, provider)
       main_menu
     end
     
+    def apply_css(widget, provider)
+         widget.style_context.add_provider(provider, GLib::MAXUINT)
+         if widget.is_a?(Gtk::Container)
+             widget.each_forall do |child|
+                 apply_css(child, provider)
+             end
+         end
+     end
+    
+    
     def main_menu
-  
         fixed = Gtk::Fixed.new
         
-        events_button = Gtk::Button.new label: "Register events"
-        
+        events_button = Gtk::Button.new label: "Experiment check-in"
         
         card_button = Gtk::Button.new label: "Card services"
         fixed.put events_button, 10, 40
@@ -119,10 +70,6 @@ class TillWrapper < EventMachine::Connection
         
         
         card_button.signal_connect "clicked" do
-          # vbox = card_services
-#           remove fixed
-#           add vbox
-#           show_all
           fixed.destroy
           card_services
         end
@@ -166,7 +113,7 @@ class TillWrapper < EventMachine::Connection
 
       tag = ''
       api = BidappApi.new
-      fixed = InterruptMe.new
+      fixed = BiathlonTag.new
       cancel_button = Gtk::Button.new label: 'Return to main menu!'
       title = Gtk::Label.new 'Hold card over reader to check in'
     
@@ -218,7 +165,7 @@ class TillWrapper < EventMachine::Connection
       end
  
             
-      fixed.signal_connect("read_tag") do |obj, tag|
+      fixed.signal_connect("read_tag") do |obj, tag_id, tag|
         # clear info box
         if info_box.buffer.text == 'Waiting for reader...'
           info_box.buffer.text = ''
@@ -226,38 +173,41 @@ class TillWrapper < EventMachine::Connection
   
         # get tag info
         # api = BidappApi.new
-        
-        userinfo = api.api_call("/nfcs/#{tag}/user_from_tag", {})
-              
+        puts "will send tag id #{tag_id} with key #{tag}"
+
+        userinfo = api.api_call("/nfcs/#{tag_id}/user_from_tag", {securekey: tag})
+
         if userinfo['data']
           username = userinfo['data']['attributes']['username']
           real_name = userinfo['data']['attributes']['name']
+        elsif userinfo['error']
+          info_box.buffer-text = "\n" + userinfo['error']
         end
-      
+
         if (real_name.nil? || username.nil?) && tag != ''
-          info_box.buffer.text = "\nNo user found for tag #{tag}" + info_box.buffer.text
+          info_box.buffer.text = "\nNo user found for tag #{tag_id}" + info_box.buffer.text + "\n"
         elsif tag != ''
           puts "/users/#{userinfo['data']['id']}/instances/#{event['id']}/user_attend"
           check_in = api.api_call("/users/#{userinfo['data']['id']}/instances/#{event['id']}/user_attend", {})
           if check_in['error']
-            info_box.buffer.text = "\nError checking in: #{check_in['error']['base'].join(' / ')}" + info_box.buffer.text 
+            info_box.buffer.text = "\nError checking in: #{check_in['error']['base'].join(' / ')}" + info_box.buffer.text + "\n"
           else
-            info_box.buffer.text = "\nChecking in user #{real_name} (#{username}) to event '#{event['name']}" + info_box.buffer.text 
+            info_box.buffer.text = "\nChecking in user #{real_name} (#{username}) to event '#{event['name']}" + info_box.buffer.text  + "\n"
           end
         else
-          info_box.buffer.text = "\nCan't find a user linked to tag #{tag}" + info_box.buffer.text
+          info_box.buffer.text = "\nCan't find a user linked to tag #{tag_id}" + info_box.buffer.text + "\n"
         end
 
 
         t =  EM.defer { fixed.read_tag(@reader) }
-        puts 'deferred!'
+
       end
 
     end
     
     
     def tag_loop(reader,  info_box)
-      tagreader = InterruptMe.new
+      tagreader = BiathlonTag.new
       tag = nil
       while tag.nil? do
         tag = tagreader.read_tag(reader)
@@ -326,7 +276,7 @@ class TillWrapper < EventMachine::Connection
     def search_users(searchterm)
       puts "Searching server for '#{searchterm}'"
       api = BidappApi.new
-      user_list = api.api_call('/nfcs/unattached_users', {q: searchterm})
+      user_list = api.api_call('/users', {q: searchterm})
 
       user_array = []
       user_list['data'].each do |u|
@@ -354,39 +304,45 @@ class TillWrapper < EventMachine::Connection
       vbox.pack_start(scrolled_win, expand: true, fill: true, padding: 10)
       
       link_button = Gtk::Button.new label: 'Link'
-      
+      back_button = Gtk::Button.new label: 'Back'
 
+      back_button.signal_connect "clicked" do
+        vbox.destroy
+        card_services
+      end
+      
       link_button.signal_connect("clicked") do |link|
-        tag_window = InterruptMe.new
+        tag_window = BiathlonTag.new
         nwl = Gtk::Label.new('Put the card up')
-        
+
         tag_window.put nwl, 20, 20
         while (Gtk.events_pending?)
           Gtk.main_iteration
         end
-        
-        
-      
-        tag_window.signal_connect("read_tag") do |obj, tag|
+ 
+        tag_window.signal_connect("read_tag") do |obj,  tag|
           if tag.nil?
             p 'tag is nil'
+
           elsif tag.length > 4
-            
-            # puts 'user_list is ' + user_list.inspect
-            # p 'user_list_tree is ' + user_list_tree.inspect
-          
-            puts "URL would be #{BidappApi::API_URL}/users/#{user_list['data'][user_list_tree.selection.selected[0].to_i-1].first.last}/link_to_nfc"
-            puts "with post data of tag " + tag.inspect
+            p user_list['data'][user_list_tree.selection.selected[0].to_i-1]['attributes']['slug']
+            puts 'config is ' + @config['api_url']
+            puts "URL would be #{@config['api_url']}/users/#{user_list['data'][user_list_tree.selection.selected[0].to_i-1]['attributes']['slug']}/link_to_nfc"
+            puts "with post data of tag " + tag.inspect 
             api = BidappApi.new
-            api.link_tag("/users/#{user_list['data'][user_list_tree.selection.selected[0].to_i-1].first.last}/link_to_nfc",  tag)
+            api.link_tag("/users/#{user_list['data'][user_list_tree.selection.selected[0].to_i-1]['attributes']['slug']}/link_to_nfc",  tag)
             vbox.destroy
             main_menu
+            # break
           end
         end
+        
         t =  Thread.new { tag = tag_window.read_tag(@reader) }
         t.join
       end
-      vbox.pack_start(link_button, expand: true, fill: true, padding: 5)
+      
+      vbox.pack_start(link_button, expand: false, fill: true, padding: 15)
+      vbox.pack_start(back_button, expand: false, fill: true, padding: 15)
       return vbox
     end
    
@@ -396,6 +352,10 @@ end
 
 
 EventMachine.run {
+
+
+
+  
   window = TillWrapper::BiathlonTill.new
   give_tick = proc { Gtk::main_iteration_do(false);
        EM.next_tick(give_tick); }
