@@ -29,7 +29,7 @@ class TillWrapper < EventMachine::Connection
   class BiathlonTill < Gtk::Window
 
     def initialize
-      @config = parse_yaml('temporary.yml')
+      @config = parse_yaml('config.yml')
       EventMachine.start_server '127.0.0.1','8080', TillWrapper, 1
       @reader = readers = NFC::Reader.all[0]
       super
@@ -91,7 +91,7 @@ class TillWrapper < EventMachine::Connection
       else
         event_buttons = []
         events['data'].each_with_index do |e, i|
-          event_buttons[i] = Gtk::Button.new label: e['name']
+          event_buttons[i] = Gtk::Button.new label: e['title']
           fixed.put event_buttons[i], 50, 40*(i+1)
           event_buttons[i].signal_connect "clicked" do
             fixed.destroy
@@ -106,7 +106,7 @@ class TillWrapper < EventMachine::Connection
       end
       fixed.put cancel_button, 20, 100
       add fixed
-      show_all
+      show_all 
     end
     
     def event_checkin(event)
@@ -122,11 +122,11 @@ class TillWrapper < EventMachine::Connection
         main_menu
       end
     
-      temporary_button = Gtk::Button.new label: 'Print temporary tag'
+      temporary_button = Gtk::Button.new label: 'Print guest ticket'
 
     
       info_box = Gtk::TextView.new
-      info_box.buffer.text = 'Waiting for reader....'
+      info_box.buffer.text = "\nWaiting for reader....\n"
 
       scrolled_win = Gtk::ScrolledWindow.new
       scrolled_win.border_width = 3
@@ -155,12 +155,16 @@ class TillWrapper < EventMachine::Connection
         if info_box.buffer.text == 'Waiting for reader...'
           info_box.buffer.text = ''
         end
-        onetimer = api.api_call("/events/#{event['id']}/onetimer", {})
+        onetimer = api.api_call("/instances/#{event['id']}/onetimer", {})
 
         if onetimer['error']
           info_box.buffer.text = "\nError generating temporary code: #{onetimer['error'].inspect}" + info_box.buffer.text 
         else
+          pf = IO.sysopen('/dev/ttyUSB0', 'w+')
+          printer = IO.new(pf)
+          printer.puts "Welcome to Temporary\n\n\nYou have participated in:\n\n  #{event['title']}\n\n\nYour entry code is:  #{onetimer['data']['attributes']['code']}\n\n\nRedeem this code at\n www.temporary.fi\n\n\n\n\n\n" 
           info_box.buffer.text = "\nGenerated temporary code: #{onetimer['data']['attributes']['code']}" + info_box.buffer.text 
+          printer.close
         end
       end
  
@@ -277,7 +281,7 @@ class TillWrapper < EventMachine::Connection
     def search_users(searchterm)
       puts "Searching server for '#{searchterm}'"
       api = BidappApi.new
-      user_list = api.api_call('/users', {q: searchterm})
+      user_list = api.api_call('/nfcs/unattached_users', {q: searchterm})
 
       user_array = []
       user_list['data'].each do |u|

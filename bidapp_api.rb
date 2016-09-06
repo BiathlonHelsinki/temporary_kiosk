@@ -8,7 +8,7 @@ end
 class BidappApi
   
   def initialize
-    @config = parse_yaml('temporary.yml')
+    @config = parse_yaml('config.yml')
   end
   
   def api_call(url = '/', options)
