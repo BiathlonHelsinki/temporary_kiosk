@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/home/pi/.rvm/rubies/ruby-2.3.1/bin/ruby
 
 require 'gtk3'
 # require './gtk_threads'
@@ -51,16 +51,16 @@ class TillWrapper < EventMachine::Connection
     
     
     def main_menu
-        fixed = Gtk::Fixed.new
-        
-        events_button = Gtk::Button.new label: "Experiment check-in"
-        
-        card_button = Gtk::Button.new label: "Card services"
-        fixed.put events_button, 10, 40
-        fixed.put card_button, 200, 40
-        set_default_size 750, 450
-        set_window_position :center
-        
+      fixed = Gtk::Fixed.new
+      
+      events_button = Gtk::Button.new label: "Experiment check-in"
+      
+      card_button = Gtk::Button.new label: "Card services"
+      fixed.put events_button, 10, 40
+      fixed.put card_button, 200, 40
+      set_default_size 750, 450
+      set_window_position :center
+
         fixed.signal_connect("delete-event") { |_widget| Gtk.main_quit }
         
         events_button.signal_connect "clicked" do

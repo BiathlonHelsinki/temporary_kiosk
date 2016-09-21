@@ -25,11 +25,8 @@ class BidappApi
   def link_tag(url = '/', tag_id, securekey)
     begin
       response = HTTParty.post(@config['api_url'] + url, headers: {"X-Hardware-Name" => @config['name'], "X-Hardware-Token" => @config['token']}, body: {tag_address: tag_id, securekey: securekey})
-      if JSON.parse(response.body)['error']
-        JSON.parse(response.body)
-      else
-        JSON.parse(response.body)['data']
-      end
+      JSON.parse(response.body)
+
     rescue HTTParty::Error => e
       JSON.parse({error: "Error from #{@config['api_url'] + url}: #{e}"}.to_json)
     rescue StandardError => e
