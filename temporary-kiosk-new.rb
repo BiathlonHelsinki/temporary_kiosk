@@ -371,7 +371,7 @@ class TillWrapper < EventMachine::Connection
             info_box.buffer.text =  "\n" + userinfo['error'] +  info_box.buffer.text
           end
 
-          if (real_name.nil? || username.nil?) && tag != ''
+          if username.nil? && tag != ''
             info_box.buffer.text = "\nNo user found for tag #{tag_address}" + info_box.buffer.text
           elsif tag != ''
             puts "/users/#{userinfo['data']['id']}/instances/#{event['id']}/user_attend"
@@ -379,7 +379,7 @@ class TillWrapper < EventMachine::Connection
             if check_in['error']
               info_box.buffer.text = "\n\nError checking in: #{check_in['error']['base'].join(' / ')}" + info_box.buffer.text 
             else
-              info_box.buffer.text = "\n\nChecking in user #{real_name} (#{username}) to event \n'#{event['title']}' (+#{event['temps']}#{TSIGN})" + info_box.buffer.text  
+              info_box.buffer.text = "\n\nChecking in user #{real_name.to_s} (#{username}) to event \n'#{event['title']}' (+#{event['temps']}#{TSIGN})" + info_box.buffer.text  
             end
           else
             info_box.buffer.text = "\n\nCan't find a user linked to tag #{tag_address}" + info_box.buffer.text 
