@@ -8,10 +8,10 @@ require_relative 'ruby-nfc-1.3/lib/ruby-nfc'
 require 'socket'
 require './bidapp_api'
 # require './tagreader'
-require 'eventmachine'
 require 'timeout'
 require 'yaml'
 require 'securerandom'
+require 'open-uri'
 require_relative 'biathlon_tag'
 
 NUMBER, CHOICE = *(0..25).to_a
@@ -68,7 +68,7 @@ def api_status_check(fixed)
 end
  
  
-class TillWrapper < EventMachine::Connection
+
   
 
   class BiathlonTill < Gtk::Application
@@ -127,7 +127,7 @@ class TillWrapper < EventMachine::Connection
       window.set_default_size 800, 480
       window.add @wrapper
       status = check_api
-    
+      
       if status == true
         @api_status = Gtk::Label.new 'API is reachable'
         @events_button.sensitive = true
@@ -172,13 +172,15 @@ class TillWrapper < EventMachine::Connection
       
     def initialize
       @config = parse_yaml('config.yml')
-      EventMachine.start_server '127.0.0.1','8080', TillWrapper, 1
+      # EventMachine.start_server '127.0.0.1','8080', TillWrapper, 1
       @reader = readers = NFC::Reader.all[0]
       super("org.gtk.exampleapp", :handles_open)
       provider = Gtk::CssProvider.new
       provider.load(:data => File.read("kiosk.css"))
-
+      p 'ok not activating'
+      
       signal_connect "activate" do |application|
+
         window = BiathlonTillMain.new(application)
         window.decorated = false
         window.signal_connect("delete-event") { |_widget| Gtk.main_quit }
@@ -324,11 +326,12 @@ class TillWrapper < EventMachine::Connection
         Gtk.main_iteration
       end
 
-      thread = EM.defer { hbox.read_tag(@reader) }
+      thread =  Thread.new { hbox.read_tag(@reader) }
       p 'thread is ' + thread.inspect
       
       cancel_button.signal_connect "clicked" do
         window.remove @wrapper
+        thread.kill
         events_menu(window)
       end
 
@@ -413,7 +416,7 @@ class TillWrapper < EventMachine::Connection
           end
 
 
-          t =  EM.defer { hbox.read_tag(@reader) }
+          t = Thread.new{  hbox.read_tag(@reader)  }
         end
 
       end
@@ -443,24 +446,27 @@ class TillWrapper < EventMachine::Connection
       label2 = Gtk::Label.new 'This will erase the card so it can be re-linked to a user.'
       
       ebox = BiathlonTag.new
-      t =  EM.defer { ebox.erase_tag(@reader) }
+      t =  Thread.new { ebox.erase_tag(@reader)  }
       
       @wrapper.pack_start label, expand: false, fill: false, padding: 15 
       @wrapper.pack_start label2, expand: false, fill: false, padding: 15 
-      
+   
       ebox.signal_connect("erase_tag") do |obj, tag|
-        (tag_id, secret) = tag.split(/---/)
+        (tag_address, secret) = tag.split(/---/)
         p 'got signal of tag ' + tag_address + ' with secret ' + secret
         api = BidappApi.new
-        erase = api.api_call("/nfcs/#{tag_address}/erase_tag")
+        erase = api.api_call('/nfcs/' + tag_address + '/erase_tag', {})
+        p 'erasing hopefully ' + "/nfcs/#{tag_address}/erase_tag"
         if erase['data']
-          @api_status = erase['data'].to_s
+          @status_message = erase['data']['tag_address'] + " has been deleted"
         else
-          @api_status = erase.inspect.to_s
-        end
+          @status_message = erase['error']
+        end       
         fixed.remove @wrapper
         main_menu(fixed)
-      end      
+
+      end  
+          
       reapply_css(@wrapper)
       fixed.add @wrapper
       fixed.show_all
@@ -472,12 +478,12 @@ class TillWrapper < EventMachine::Connection
       @wrapper.pack_start label, expand: false, fill: false, padding: 15    
       
       hbox = BiathlonTag.new
-      t =  EM.defer { hbox.read_tag(@reader) }
+      t = Thread.new { hbox.read_tag(@reader)  }
+
       response_label = nil
-      userbox = nil
+      outer_user_box = nil
       api = BidappApi.new
       hbox.signal_connect("read_tag") do |obj, tag|
-        p 'returning to hbox'
         fixed.remove @wrapper
         unless response_label.nil?
           begin
@@ -485,8 +491,8 @@ class TillWrapper < EventMachine::Connection
           rescue Exception => e
             p e
           end
-          unless userbox.nil?
-            @wrapper.remove userbox
+          unless outer_user_box.nil?
+            @wrapper.remove outer_user_box
           end
         end
         if tag == 'Mifare error'
@@ -500,6 +506,8 @@ class TillWrapper < EventMachine::Connection
             Gtk.main_iteration
           end
           if userinfo['data']
+            outer_user_box = Gtk::Box.new :horizontal
+            
             userbox = Gtk::Box.new :vertical
             username = Gtk::Label.new "Username: " + userinfo['data']['attributes']['username']
             if userinfo['data']['attributes']['name']
@@ -517,6 +525,23 @@ class TillWrapper < EventMachine::Connection
               last_attended =  Gtk::Label.new "No activities attended yet."
               last_at = Gtk::Label.new ""
             end
+            
+            # get image
+            if userinfo['data']['attributes']['avatar']['avatar']['medium']['url'] == '/assets/transparent.gif'
+              image = Gtk::Image.new(:file => "img/missing_user.png")
+            else
+              p "attempting to get URL #{userinfo['data']['attributes']['avatar']['avatar']['small']['url']}"
+              p "and write to local file img/tmp/#{File.basename(userinfo['data']['attributes']['avatar']['avatar']['small']['url'])}"
+              begin
+                File.open("img/tmp/#{File.basename(userinfo['data']['attributes']['avatar']['avatar']['small']['url'])}", 'wb') do |fo|
+                  fo << URI.join(userinfo['data']['attributes']['avatar']['avatar']['small']['url'].gsub(/development/, 'production')).read 
+                end
+                image = Gtk::Image.new(:file => "img/tmp/#{File.basename(userinfo['data']['attributes']['avatar']['avatar']['small']['url'])}")
+              rescue
+                image = Gtk::Image.new(:file => "img/missing_user.png")
+              end
+            end
+            
             userbox.pack_start username
             userbox.pack_start name
             userbox.pack_start member_since
@@ -524,7 +549,9 @@ class TillWrapper < EventMachine::Connection
             userbox.pack_start balance
             userbox.pack_start last_attended
             userbox.pack_start last_at
-            @wrapper.pack_start userbox
+            outer_user_box.pack_start image
+            outer_user_box.pack_start userbox
+            @wrapper.pack_start outer_user_box
             reapply_css(@wrapper)
             while Gtk.events_pending? do
               Gtk.main_iteration
@@ -537,11 +564,13 @@ class TillWrapper < EventMachine::Connection
         while Gtk.events_pending? do
           Gtk.main_iteration
         end
-        t =  EM.defer { hbox.read_tag(@reader) }
+        t =  Thread.new { hbox.read_tag(@reader)  }
       end
       
       cancel_button = Gtk::Button.new label: 'Return to main menu'
       cancel_button.signal_connect "clicked" do
+        
+        t.kill
         hbox.destroy
         fixed.remove @wrapper
         puts 'back to main menu'
@@ -717,7 +746,7 @@ class TillWrapper < EventMachine::Connection
           when -6
             dialogue.destroy
           when -5
-            tag = EM.defer { tag_window.write_tag(@reader) }
+            tag = Thread.new{ tag_window.write_tag(@reader) }
 
             tag_window.signal_connect("write_tag") do |obj,  tag|
               if tag.nil?
@@ -743,6 +772,7 @@ class TillWrapper < EventMachine::Connection
                 end
                 vbox.destroy
                 dialogue.destroy
+                
                 main_menu(fixed) 
               end
             end
@@ -775,22 +805,9 @@ class TillWrapper < EventMachine::Connection
   end
   
   
-end
-
-
-EventMachine.run {
 
 
 
-  
-  window = TillWrapper::BiathlonTill.new
-  
-  give_tick = proc { 
-      puts window.run
-    
-       Gtk::main_iteration_do(false);
-       EM.next_tick(give_tick); }
-  give_tick.call
-}
-
-# Gtk.main_with_queue(100)
+window = BiathlonTill.new
+window.run
+# Gtk.main
