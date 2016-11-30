@@ -232,6 +232,8 @@ end
       # get today's events
       api = BidappApi.new
       events = api.api_call('/events/today', {})
+  
+        
       if events['error']
         @api_status = events['error']
       elsif events['data'].empty?
@@ -239,7 +241,7 @@ end
       else
         event_buttons = []
         events['data'].each_with_index do |e, i|
-          event_buttons[i] = Gtk::Button.new label: e['title'] + " (#{e['temps']}#{TSIGN})"
+          event_buttons[i] = Gtk::Button.new label: e['attributes']['name'] + " (#{e['attributes']['cost-bb']}#{TSIGN})"
           event_buttons[i].set_size_request 50, 80
           @wrapper.pack_start event_buttons[i], expand: false, fill: false, padding: 15
           event_buttons[i].signal_connect "clicked" do

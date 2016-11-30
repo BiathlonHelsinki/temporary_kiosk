@@ -13,6 +13,7 @@ require 'yaml'
 require 'securerandom'
 require 'open-uri'
 require_relative 'biathlon_tag'
+require 'timeout'
 
 NUMBER, CHOICE = *(0..25).to_a
 TSIGN = 'Ŧ'
@@ -100,14 +101,14 @@ end
     end
     
     def main_menu(window)
-      if @wrapper
-        window.remove(@wrapper)
-        @wrapper.destroy
-        puts 'making wrapper again'
-        @wrapper = init_ui
-
-        @wrapper.show_all
-      end
+      # if @wrapper
+      #   window.remove(@wrapper)
+      #   @wrapper.destroy
+      #   puts 'making wrapper again'
+      #   @wrapper = init_ui
+      #
+      #   @wrapper.show_all
+      # end
       halign = Gtk::Alignment.new 1, 0, 0, 0
       @hbox = Gtk::Box.new(:horizontal, 5)
       lalign = Gtk::Alignment.new 0, 1, 0, 0
@@ -155,9 +156,9 @@ end
         events_menu(window)
       end
       @restart_button.signal_connect 'clicked' do
-	@wrapper.destroy
+	      @wrapper.destroy
         window.destroy
-	 Gtk.main_quit
+	      Gtk.main_quit
       end
 
       @card_button.signal_connect "clicked" do
@@ -168,8 +169,8 @@ end
       unless @api_status.nil?
         @wrapper.pack_start @api_status, expand: false, fill: false, padding: 5
       end
-      unless @status_message.nil?
-        status_label = Gtk::Label.new @status_message, name: 'status'
+      if defined? @status_message
+        status_label = Gtk::Label.new @status_message, name: 'status_message'
         @wrapper.pack_start status_label, expand: false, fill: false, padding: 50
       end
       @hbox.pack_start @events_button, :expand => false, :fill => false, :padding =>2
@@ -206,8 +207,14 @@ end
         end
         
         apply_css(window, provider)
-        events_menu(window)
-        window.show_all
+        if File.file?('latest.json')
+          file = File.read('latest.json')
+          e = JSON.parse(file)
+          event_checkin(e, window)
+        else
+          events_menu(window)
+        end
+
       end
       
     end
@@ -234,7 +241,7 @@ end
         puts 'making wrapper again'
         @wrapper = init_ui
 
-        
+
       end
       @wrapper = init_ui unless @wrapper
       
@@ -257,8 +264,11 @@ end
         @api_status = 'No activities today, sorry!'
       else
         event_buttons = []
-
+         event_json = []
+        events_frame = Gtk::Box.new :vertical
+        events_frame.set_name 'events'
         events['data'].each_with_index do |e, i|
+          event_json[i] = e
           event_buttons[i] = Gtk::Button.new label: e['attributes']['name'] + " (#{e['attributes']['cost-bb']}#{TSIGN})"
           # p "attempting to get URL #{e['attributes']['image']['image']['thumb']['url']}"
           # p "and write to local file img/tmp/#{File.basename(e['attributes']['image']['image']['thumb']['url'])}"
@@ -274,21 +284,40 @@ end
           
          
           # event_buttons[i].set_size_request 50, 80
-          @wrapper.pack_start event_buttons[i], expand: false, fill: true, padding: 10
+          events_frame.pack_start event_buttons[i], expand: false, fill: false, padding: 10
           event_buttons[i].signal_connect "clicked" do
+            File.open('latest.json', 'w') { |file| file.write(event_json[i].to_json) }
             fixed.remove @wrapper
             event_checkin(e, fixed)
           end
         end
+        @wrapper.pack_start events_frame
       end
-      cancel_button = Gtk::Button.new label: 'Re-query events'
-      cancel_button.signal_connect "clicked" do
-        fixed.remove @wrapper
-        puts 'back to main menu'
-        events_menu(fixed)
+      bottom_box = Gtk::Box.new :horizontal
+        cancel_button = Gtk::Button.new label: 'Re-query events'
+        cancel_button.signal_connect "clicked" do
+          fixed.remove @wrapper
+          puts 'back to main menu'
+          events_menu(fixed)
+        end
+        cancel_button.set_size_request 70, 70
+        
+        card_button = Gtk::Button.new label: 'Card services'
+        card_button.signal_connect "clicked" do
+          @wrapper.destroy
+          card_services(fixed)
+        end
+      bottom_box.pack_start cancel_button, padding: 15
+      bottom_box.pack_start card_button, padding: 15
+      restart_button = Gtk::Button.new label: 'Restart'
+      bottom_box.pack_end restart_button, padding: 15
+      restart_button.signal_connect 'clicked' do
+	      @wrapper.destroy
+        fixed.destroy
+	      Gtk.main_quit
       end
-      cancel_button.set_size_request 70, 70
-      @wrapper.pack_start cancel_button, expand: false, fill: false, padding: 5
+      @wrapper.pack_start bottom_box, expand: false, fill: false, padding: 5
+      
       fixed.add @wrapper
       reapply_css(@wrapper)
       fixed.show_all 
@@ -325,7 +354,8 @@ end
     end
     
     def event_checkin(event, window, tag_id = nil)
-      # @wrapper = init_ui
+      # @wrapper = init_ui\
+      p 'thread list size is ' + Thread.list.size.to_s
       tag = ''
       api = BidappApi.new
       @wrapper = Gtk::Box.new :horizontal, 0
@@ -366,7 +396,6 @@ end
       
       # right_vbox.pack_start temporary_button, expand: false, fill: false, padding: 15
 
-      hbox = BiathlonTag.new 
       # hbox.pack_start scrolled_win, expand: false, fill: false, padding: 15
       # hbox.pack_start right_vbox, expand: false, fill: false, padding: 15
       cancel_button = Gtk::Button.new label: 'Change experiment'
@@ -374,6 +403,12 @@ end
       guest_ticket = Gtk::Button.new label: 'Print guest ticket'
       guest_ticket.set_size_request 100, 50
             
+      if defined? @status_message
+        status_message = Gtk::Label.new @status_message
+        status_message.set_name 'status_message'
+        main_return_area.pack_start status_message
+        @status_message = nil
+      end
 
       
       left_wrapper.pack_start title_wrapper, expand: false, fill: false, padding: 10
@@ -395,13 +430,26 @@ end
       while (Gtk.events_pending?)
         Gtk.main_iteration
       end
+      if defined? hbox
+        p 'hbox is ' + hbox.inspect
+      end
+      hbox = BiathlonTag.new if hbox.nil?
+      thread =  Thread.new {
 
-      thread =  Thread.new { hbox.read_tag(@reader) }
+                  
+                   loop do
+                     p 'thread list size is ' + Thread.list.size.to_s
+                     Thread.list.each_with_index do |t, i|
+                       p 'thread ' + i.to_s + ': ' + t.status.to_s
+                     end
+                      hbox.read_tag(@reader, Thread.current.object_id) 
+                    end
+                    
+                }
       # p 'thread is ' + thread.inspect
       
       cancel_button.signal_connect "clicked" do
         window.remove @wrapper
-        thread.kill
         events_menu(window)
       end
 
@@ -439,7 +487,9 @@ end
       end
  
             
-      hbox.signal_connect("read_tag") do |obj, tag|
+      hbox.signal_connect("read_tag") do |obj, ary|
+        tag = ary.first
+        thread = ary.last
         if tag == 'Mifare error'
           info_box.buffer.text = "\nError reading card - please try again!\n" + info_box.buffer.text
           while (Gtk.events_pending?)
@@ -479,7 +529,10 @@ end
           end
 
           if username.nil? && tag != ''
-            info_box.buffer.text = "\nNo user found for tag #{tag_address} {debug: #{userinfo.inspect}}" + info_box.buffer.text
+            info_box.buffer.text = "\nNo users found for tag #{tag_address} {debug: #{userinfo.inspect}}" + info_box.buffer.text
+           
+
+            
             window.remove @wrapper
             left_wrapper.remove main_return_area
             
@@ -487,8 +540,8 @@ end
             main_return_area = Gtk::Box.new :vertical
             new_card_label = Gtk::Label.new 'Blank card - link to new user?'
             main_return_area.pack_start new_card_label 
-            
-            a = look_for_users(main_return_area, window, event)
+  
+            a = look_for_users(main_return_area, window, event, hbox, thread)
             search_interface = a.first
             entry = a.last
             while (Gtk.events_pending?)
@@ -507,6 +560,7 @@ end
             reapply_css(@wrapper)
             entry.set_can_focus true
             entry.grab_focus
+      
             while (Gtk.events_pending?)
               Gtk.main_iteration
             end
@@ -590,13 +644,16 @@ end
           end
          
         end
+      if hbox.nil?
+         hbox = BiathlonTag.new
+       end
        t = Thread.new{  hbox.read_tag(@reader)  }
       end
     
     end
     
     
-    def look_for_users(main_return_area, window, event)
+    def look_for_users(main_return_area, window, event, hbox, thread)
       return_box = Gtk::Box.new :vertical
       
       search_box = Gtk::Box.new :horizontal
@@ -624,7 +681,7 @@ end
         
         
         if query == false
-          no_results = Gtk::Label.new 'No search results, please try again.'          
+          no_result = Gtk::Label.new 'No search results, please try again.'          
           this_box.pack_start no_result          
         else
           this_box.pack_start query.first
@@ -646,20 +703,37 @@ end
           user_list = query[4]
           link_button = query[2]
           link_button.signal_connect("clicked") do |link|
+             p '-- -- -- kill thread ' + thread.inspect
+             Thread.list.each do |t|
+               if t.object_id == thread
+                 p 'killing ' + t.inspect
+                 t.kill
+               end
+             end
+               
             p 'pushed linked button'
-
-            tag_window = BiathlonTag.new 
-            tag = Thread.new{ tag_window.write_tag(@reader) }
+            # hbox.destroy
+             # tag_window = BiathlonTag.new
+            # tag = Thread.new{ tag_window.write_tag(@reader, Thread.current.object_id) }
+            new_thread = Thread.new { 
+              tag = hbox.write_tag(@reader, Thread.current.object_id)
+            }
             while (Gtk.events_pending?)
               Gtk.main_iteration
             end
           
-            tag_window.signal_connect("write_tag") do |obj,  tag|
-              p 'got to write tag callback'
+            hbox.signal_connect("write_tag") do |obj,  ary|
+              p 'outputting threads on write_tag signal'
+              Thread.list.each do |t|
+                p t.inspect
+              end  
+              tag = ary.first
+              thread = ary.last
+              p 'got to write tag callback with thread ' + thread.to_s
               if tag.nil?
                 p 'tag is nil'
               elsif tag == 'Mifare error'
-                @status_message = 'Error reading tag (because they are cheap), please try again. Sorry!'
+                @status_message = "Error reading tag\n(because they are cheap)\nplease try again. Sorry!"
                 main_return_area.remove this_box
 
                 
@@ -675,9 +749,13 @@ end
                 if r['error']
                   @status_message = r['error']
                 elsif r['data']
-                  @status_message = 'Linked user ' + user_list['data'][user_list_tree.selection.selected[0].to_i-1]['attributes']['username'] + ' to id card #' + tag_id.to_s
+                  @status_message = 'Linked user ' + user_list['data'][user_list_tree.selection.selected[0].to_i-1]['attributes']['username'] + "\nto id card #" + tag_id.to_s
                 end
+                p @status_message
                 main_return_area.remove this_box
+                window.remove @wrapper
+                
+                event_checkin(event, window)
               end
             end
           end
@@ -779,32 +857,73 @@ end
     end
       
     def erase_card(fixed)
+       p 'thread list size is ' + Thread.list.size.to_s
+       Thread.list.each_with_index do |t, i|
+         p 'thread ' + i.to_s + ': ' + t.status.to_s
+       end
       @wrapper = init_ui
       label = Gtk::Label.new 'Hold card over reader (below screen, over the wood above the black printer)...'
       label2 = Gtk::Label.new 'This will erase the card so it can be re-linked to a user.'
       
       ebox = BiathlonTag.new
-      t =  Thread.new { ebox.erase_tag(@reader)  }
+      t =  Thread.new { 
+        # kill all other threads?
+        Thread.list.each_with_index do |t, i|
+          next if i == 0
+          unless t == Thread.current
+            p 'killing ' + t.inspect
+            t.kill
+          end
+        end
+          ebox.erase_tag(@reader, Thread.current.object_id)  
+      
+      }
       
       @wrapper.pack_start label, expand: false, fill: false, padding: 15 
       @wrapper.pack_start label2, expand: false, fill: false, padding: 15 
    
-      ebox.signal_connect("erase_tag") do |obj, tag|
+      ebox.signal_connect("erase_tag") do |obj, ary|
+        tag = ary.first
+        thread = ary.last
         (tag_address, secret) = tag.split(/---/)
         p 'got signal of tag ' + tag_address + ' with secret ' + secret
         api = BidappApi.new
         erase = api.api_call('/nfcs/' + tag_address + '/erase_tag', {})
-        p 'erasing hopefully ' + "/nfcs/#{tag_address}/erase_tag"
-        if erase['data']
-          @status_message = erase['data']['tag_address'] + " has been deleted"
+        # p 'erasing hopefully ' + "/nfcs/#{tag_address}/erase_tag"
+
+        if erase['tag_address']
+          @status_message = 'Card ' + erase['tag_address'] + "\nhas been deleted"
         else
           @status_message = erase['error']
         end       
+        # p 'status message should be ' + @status_message
+        # p '-- -- -- attempting to kill thread ' + thread.inspect
+        # Thread.list.each do |t|
+        #   if t.object_id == thread
+        #     p 'killing ' + t.inspect
+        #     t.kill
+        #   end
+        # end
+        while Gtk.events_pending? do
+          Gtk.main_iteration
+        end
         fixed.remove @wrapper
-        main_menu(fixed)
-
+        if File.file?('latest.json')
+          file = File.read('latest.json')
+          e = JSON.parse(file)
+          p 'should return now'
+          event_checkin(e, fixed)
+        else
+          events_menu(fixed)
+        end
+        while Gtk.events_pending? do
+          Gtk.main_iteration
+        end
       end  
-          
+      p 'thread list size is ' + Thread.list.size.to_s
+      Thread.list.each_with_index do |t, i|
+        p 'thread ' + i.to_s + ': ' + t.status.to_s
+      end
       reapply_css(@wrapper)
       fixed.add @wrapper
       fixed.show_all
@@ -821,7 +940,9 @@ end
       response_label = nil
       outer_user_box = nil
       api = BidappApi.new
-      hbox.signal_connect("read_tag") do |obj, tag|
+      hbox.signal_connect("read_tag") do |obj, ary|
+        tag = ary.first
+        thread = ary.last
         fixed.remove @wrapper
         unless response_label.nil?
           begin
@@ -907,12 +1028,11 @@ end
       
       cancel_button = Gtk::Button.new label: 'Return to main menu'
       cancel_button.signal_connect "clicked" do
-        
-        t.kill
+
         hbox.destroy
         fixed.remove @wrapper
         puts 'back to main menu'
-        main_menu(fixed)
+        events_menu(fixed)
       end
       cancel_button.set_size_request 70, 60
       @wrapper.pack_start cancel_button, expand: false, fill: false, padding: 15
@@ -951,7 +1071,7 @@ end
       cancel_button.signal_connect "clicked" do
         fixed.remove @wrapper
         puts 'back to main menu'
-        main_menu(fixed)
+        events_menu(fixed)
       end
       cancel_button.set_size_request 70, 60
       @wrapper.pack_start cancel_button, expand: false, fill: false, padding: 15
@@ -982,6 +1102,7 @@ end
       
       cancel_button.signal_connect "clicked" do
         fixed.remove @w
+        fixed.remove @wrapper
         main_menu(fixed)
       end
       
