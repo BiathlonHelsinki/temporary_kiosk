@@ -387,17 +387,6 @@ end
       scrolled_win.add(info_box)
       scrolled_win.set_size_request 200, 280
 
-      
-
-      # right_vbox = Gtk::Box.new :vertical, 5
-
-    
-
-      
-      # right_vbox.pack_start temporary_button, expand: false, fill: false, padding: 15
-
-      # hbox.pack_start scrolled_win, expand: false, fill: false, padding: 15
-      # hbox.pack_start right_vbox, expand: false, fill: false, padding: 15
       cancel_button = Gtk::Button.new label: 'Change experiment'
       cancel_button.set_size_request 50, 50
       guest_ticket = Gtk::Button.new label: 'Print guest ticket'
@@ -591,7 +580,9 @@ end
                 error_msg = Gtk::Label.new check_in['error']['base'].join(' / ')
                 error_msg.set_name "error_red"
                 main_return_area.pack_start error_msg
-                
+                while (Gtk.events_pending?)
+                  Gtk.main_iteration
+                end
                 left_wrapper.pack_start main_return_area
                 @wrapper.pack_start left_wrapper, expand: true, fill: false, padding: 0
                 @wrapper.pack_start right_wrapper
@@ -610,7 +601,7 @@ end
               main_return_area = nil
               main_return_area = Gtk::Box.new :vertical
               outer_user_box = user_info_onscreen(userinfo)
- 
+              
               main_return_area.pack_start outer_user_box
               success_msg = Gtk::Label.new "Checked in!"
               temps_msg = Gtk::Label.new "You will receive #{event['attributes']['cost-bb']}#{TSIGN}."
@@ -644,10 +635,10 @@ end
           end
          
         end
-      if hbox.nil?
+       if hbox.nil?
          hbox = BiathlonTag.new
        end
-       t = Thread.new{  hbox.read_tag(@reader)  }
+       # t = Thread.new{  hbox.read_tag(@reader)  }
       end
     
     end
